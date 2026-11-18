@@ -1,0 +1,102 @@
+import numpy as np
+
+# Q-table implemented as dictionary
+qtable = {}
+print(qtable)
+
+# Board implemented as a 3x3 array
+board = np.full([3, 3], ' ')
+print(board)
+
+
+# Check for winner from the board state
+def check_winner(player, board):
+    # Check rows
+    for r in np.arange(board.shape[0]):
+        if sum(board[r, :] == player) == 3:
+            return True
+    # Check columns
+    for c in np.arange(board.shape[1]):
+        if sum(board[:, c] == player) == 3:
+            return True
+    # Check diagonals
+    if sum(board.diagonal() == player) == 3:
+        return True
+    if sum(np.fliplr(board).diagonal() == player) == 3:
+        return True
+    return False
+
+
+# Check free slots and choose one randomly
+def rmove(fboard):
+    freeslots = np.where(fboard == ' ')
+    return np.random.choice(freeslots[0])
+
+
+# Choose move using Q-table (or random if state not seen yet)
+def qmove(bs, qtable):
+    if bs not in qtable.keys():
+        barr = np.array(bs)
+        freeslots = np.where(barr == ' ')
+        return np.random.choice(freeslots[0])
+    else:
+        return np.argmax(qtable[bs])
+
+
+# Updating Q-table
+def qupdate(ms, mp, qtable, rw):
+    cr = rw
+    j = 2
+    for i in reversed(mp):
+        if ms[j] not in qtable.keys():
+            qtable[ms[j]] = np.zeros(9)
+        qtable[ms[j]][i] = qtable[ms[j]][i] + 0.9 * cr
+        cr = qtable[ms[j]][i]
+        j = j - 1
+
+
+# Flattening the board (view of the 3x3 board)
+fboard = board.ravel()
+
+# Training the agent and updating the Q-table
+iterations = 10000
+for j in np.arange(iterations):
+    board.fill(' ')
+    plxs = []
+    xs = []
+    os = []
+
+    for i in np.arange(3):
+        plxs.append(tuple(fboard))
+        xm = rmove(fboard)
+        xs.append(xm)
+        fboard[xm] = 'x'  # Player 1 move
+
+        om = rmove(fboard)
+        os.append(om)
+        fboard[om] = 'o'  # Player 2 move
+
+    if check_winner('x', board):
+        qupdate(plxs, xs, qtable, 1)
+    elif not check_winner('o', board):
+        qupdate(plxs, xs, qtable, 0.5)
+
+# Number of entries made in Q-table
+print("Q-table entries:", len(qtable.keys()))
+print("Training complete")
+
+# Play the game: player 'x' uses Q-table to pick moves
+board.fill(' ')
+for i in np.arange(3):
+    print("ply :", i + 1)
+    fboard[qmove(tuple(fboard), qtable)] = 'x'  # Player 1 move
+    print(board)
+    if check_winner('x', board):
+        print("x wins")
+        break
+
+    fboard[rmove(fboard)] = 'o'  # Player 2 move
+    print(board)
+    if check_winner('o', board):
+        print("o wins")
+        break

@@ -1,0 +1,63 @@
+from pandas import read_csv
+from sklearn.model_selection import KFold, cross_val_score
+from sklearn.ensemble import BaggingClassifier, AdaBoostClassifier
+from sklearn.tree import DecisionTreeClassifier
+
+# Reading the dataset
+data = read_csv('proc_cleveland.csv')
+print(data.head())
+
+# Inspecting data and preprocessing
+data.info()
+
+# Find unique values
+print("Unique ca:", data.ca.unique())
+print("Unique thal:", data.thal.unique())
+
+# Locate records with '?' attribute values
+print(data.loc[data.ca == '?'])
+print(data.loc[data.thal == '?'])
+
+# Drop records with '?' in 'ca'
+ix = data[data.ca == '?'].index
+data.drop(ix, inplace=True)
+
+# Drop records with '?' in 'thal'
+iy = data[data.thal == '?'].index
+data.drop(iy, inplace=True)
+
+# Change the column data types as required
+data = data.astype({'ca': 'int64', 'thal': 'int64'})
+data.info()
+
+# Convert the multiclass target to binary class (0 = no disease, 1 = disease)
+data.loc[data.num > 0, 'num'] = 1
+print(data.head())
+
+# Get the features and target arrays from the dataframe
+array = data.values
+X = array[:, 0:13]
+Y = array[:, 13]
+
+print("Features sample:\n", X[:5])
+print("Target sample:\n", Y[:5])
+
+# Initialize cross-validation object and create the decision tree classifier
+seed = 1
+kfold = KFold(n_splits=10, shuffle=True, random_state=seed)
+cart = DecisionTreeClassifier()
+
+# Evaluate single Decision Tree (Without Bagging)
+cart_score = cross_val_score(cart, X, Y, cv=kfold)
+print("Decision Tree Accuracy:", cart_score.mean())
+
+# Create and evaluate the Bagging Classifier
+num_trees = 100
+model_bg = BaggingClassifier(estimator=cart, n_estimators=num_trees, random_state=seed)
+results = cross_val_score(model_bg, X, Y, cv=kfold)
+print("Bagging Classifier Accuracy:", results.mean())
+
+# Create and evaluate the AdaBoost Classifier
+model_ada = AdaBoostClassifier(n_estimators=100, random_state=seed)
+results_ada = cross_val_score(model_ada, X, Y, cv=kfold)
+print("AdaBoost Classifier Accuracy:", results_ada.mean())

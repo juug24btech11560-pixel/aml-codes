@@ -1,0 +1,87 @@
+import boto3
+import io
+import pandas as pd
+import numpy as np
+import sagemaker
+from sagemaker import get_execution_role
+from sagemaker.amazon.common import write_numpy_to_dense_tensor
+from sagemaker.predictor import csv_serializer, json_deserializer
+
+# 1. Specify S3 bucket and prefix
+bucket = '{ENTER_BUCKET_NAME}'  # Must start with 'sagemaker-'
+prefix = 'sagemaker/heart'
+data_key = 'heart.csv'
+data_location = f's3://{bucket}/{data_key}'
+
+# Define IAM role and SageMaker session
+role = get_execution_role()
+sess = sagemaker.Session()
+region = boto3.Session().region_name
+
+# 2. Load and preprocess the Heart Disease dataset
+df = pd.read_csv(data_location)
+df.replace('?', np.nan, inplace=True)
+df.dropna(inplace=True)
+df = df.astype(float)
+
+# Convert target column ('num' or 'target') to binary (0 or 1)
+target_col = df.columns[-1]
+df[target_col] = (df[target_col] > 0).astype(np.float32)
+
+# Split into features (X) and labels (y)
+X = df.iloc[:, :-1].values.astype(np.float32)
+y = df.iloc[:, -1].values.astype(np.float32)
+
+# 80/20 Train-Test split
+split_idx = int(0.8 * len(X))
+X_train, X_test = X[:split_idx], X[split_idx:]
+y_train, y_test = y[:split_idx], y[split_idx:]
+
+# 3. Upload training data to S3 in RecordIO-Protobuf format
+buf = io.BytesIO()
+write_numpy_to_dense_tensor(buf, X_train, y_train)
+buf.seek(0)
+
+train_key = f'{prefix}/train/recordio-pb-data'
+boto3.resource('s3').Bucket(bucket).Object(train_key).upload_fileobj(buf)
+s3_train_data = f's3://{bucket}/{train_key}'
+print(f'Uploaded training data to: {s3_train_data}')
+
+# 4. Configure and train SageMaker Linear Learner model
+container = sagemaker.image_uris.retrieve('linear-learner', region)
+output_location = f's3://{bucket}/{prefix}/output'
+
+linear = sagemaker.estimator.Estimator(
+    container,
+    role,
+    instance_count=1,
+    instance_type='ml.m4.xlarge',
+    output_path=output_location,
+    sagemaker_session=sess
+)
+
+linear.set_hyperparameters(
+    feature_dim=X_train.shape[1],
+    predictor_type='binary_classifier',
+    mini_batch_size=32
+)
+
+linear.fit({'train': s3_train_data})
+
+# 5. Deploy the model to a real-time SageMaker Endpoint
+heartdisease_predictor = linear.deploy(
+    initial_instance_count=1,
+    instance_type='ml.m4.xlarge'
+)
+print(f'Endpoint name: {heartdisease_predictor.endpoint_name}')
+
+# 6. Test real-time prediction (matches sample payload in manual)
+heartdisease_predictor.serializer = csv_serializer
+heartdisease_predictor.deserializer = json_deserializer
+
+sample_patient = np.array([[23, 1, 3, 145, 233, 1, 0, 150, 0, 2.3, 0, 0, 1]], dtype=np.float32)
+result = heartdisease_predictor.predict(sample_patient)
+
+pred_label = result['predictions'][0]['predicted_label']
+score = result['predictions'][0]['score']
+print(f"Prediction label is {pred_label} with confidence of {score}")
